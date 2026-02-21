@@ -1,0 +1,217 @@
+#include <MD_Parola.h>
+#include <MD_MAX72xx.h>
+#include <SPI.h>
+
+// ================== DISPLAY SETUP ==================
+#define MAX_DEVICES 4 //PANELS 
+#define CLK_PIN 11
+#define DATA_PIN 12
+#define CS_PIN 10
+
+MD_Parola display = MD_Parola(MD_MAX72XX::FC16_HW, DATA_PIN, CLK_PIN, CS_PIN, MAX_DEVICES);
+
+// ================== INPUT / SOUND ==================
+#define BUTTON_PIN 2
+#define BUZZER_PIN 9
+
+// ================== GRID ==================
+#define WIDTH 8
+#define HEIGHT 32
+
+// ================== GAME VARIABLES ==================
+int blockPos = 0;
+int blockWidth = 4;
+int blockRow = 0;
+bool blockMoving = true;
+int stack[HEIGHT][WIDTH];
+bool gameOverFlag = false;
+unsigned long lastMove = 0;
+int moveDelay = 220;
+bool moveRight = true;
+
+// ================== SETUP ==================
+void setup() {
+  Serial.begin(9600);
+
+  display.begin();
+  display.setIntensity(5);
+  display.displayClear();
+
+  pinMode(BUTTON_PIN, INPUT_PULLUP);
+  pinMode(BUZZER_PIN, OUTPUT);
+
+  randomSeed(analogRead(A0));
+  resetGame();
+}
+
+// ================== RESET GAME ==================
+void resetGame() {
+  for (int r = 0; r < HEIGHT; r++)
+    for (int c = 0; c < WIDTH; c++)
+      stack[r][c] = 0;
+
+  blockRow = 0;
+  blockMoving = true;
+  gameOverFlag = false;
+  moveDelay = 220;
+  moveRight = true;
+
+  blockWidth = 4;
+  blockPos = random(0, WIDTH - blockWidth + 1);
+
+  drawGame();
+}
+
+// ================== SPEED INCREASE ==================
+void updateSpeed() {
+  if (blockRow < 8) moveDelay = 200;
+  else if (blockRow < 16) moveDelay = 160;
+  else if (blockRow < 24) moveDelay = 140;
+  else moveDelay = 100;
+}
+
+// ================== DRAW STACK GAME ==================
+void drawGame() {
+  display.displayClear();
+
+  for (int r = 0; r < HEIGHT; r++) {
+    for (int c = 0; c < WIDTH; c++) {
+      if (stack[r][c]) {
+        display.getGraphicObject()->setPoint(c, r, true);
+      }
+    }
+  }
+
+  if (!gameOverFlag && blockMoving) {
+    for (int c = blockPos; c < blockPos + blockWidth; c++) {
+      display.getGraphicObject()->setPoint(c, blockRow, true);
+    }
+  }
+
+  display.displayAnimate();
+}
+
+// ================== SCROLL GAME OVER ==================
+void showGameOver() {
+  display.displayClear();
+
+  display.displayText(" GAME OVER LOSER!", PA_CENTER, 50, 2000, PA_SCROLL_LEFT, PA_SCROLL_LEFT);
+
+  while (!display.displayAnimate()) {
+    // wait until finished scrolling
+  }
+}
+
+// ================== SCROLL WINNER ==================
+void showWinner() {
+  display.displayClear();
+
+  display.displayText(" WINNER... NOW GO TOUCH SOME GRASS", PA_CENTER, 50, 2000, PA_SCROLL_LEFT, PA_SCROLL_LEFT);
+
+  // Victory tone sequence
+  tone(BUZZER_PIN, 1000, 200);
+  delay(250);
+  tone(BUZZER_PIN, 1200, 200);
+  delay(250);
+  tone(BUZZER_PIN, 1500, 400);
+
+  while (!display.displayAnimate()) {
+    // wait until finished scrolling
+  }
+}
+
+// ================== DROP BLOCK ==================
+void dropBlock() {
+  blockMoving = false;
+
+  int module = blockRow / 8;
+
+  if (module == 0) blockWidth = 4;
+  else if (module == 1) blockWidth = 3;
+  else if (module == 2) blockWidth = 2;
+  else blockWidth = 1;
+
+  int overlap = 0;
+  int prevRow = blockRow - 1;
+  bool perfect = true;
+
+  for (int c = blockPos; c < blockPos + blockWidth; c++) {
+    if (prevRow < 0 || stack[prevRow][c]) {
+      stack[blockRow][c] = 1;
+      overlap++;
+    } else {
+      perfect = false;
+    }
+  }
+
+  int required = blockWidth;
+  if (blockWidth >= 3 && prevRow >= 0)
+    required = blockWidth - 1;
+
+  if (!perfect && overlap < required) {
+    gameOverFlag = true;
+
+    // Game Over Sound
+    tone(BUZZER_PIN, 400, 300);
+    delay(350);
+    tone(BUZZER_PIN, 250, 600);
+    delay(650);
+
+    showGameOver();
+    return;
+  }
+
+  if (perfect) overlap = blockWidth;
+  blockWidth = overlap;
+
+  // Perfect landing tone
+  tone(BUZZER_PIN, 1000, 100);
+
+  blockRow++;
+  updateSpeed();
+
+  // Victory condition
+  if (blockRow >= HEIGHT) {
+    gameOverFlag = true;
+    showWinner();
+    return;
+  }
+
+  blockPos = random(0, WIDTH - blockWidth + 1);
+  blockMoving = true;
+
+  drawGame();
+}
+
+// ================== MAIN LOOP ==================
+void loop() {
+
+  if (gameOverFlag) {
+    if (digitalRead(BUTTON_PIN) == LOW) {
+      delay(200);
+      resetGame();
+      while (digitalRead(BUTTON_PIN) == LOW);
+    }
+    return;
+  }
+
+  // Move block left/right
+  if (blockMoving && millis() - lastMove >= moveDelay) {
+    blockPos += moveRight ? 1 : -1;
+
+    if (blockPos <= 0) moveRight = true;
+    if (blockPos >= WIDTH - blockWidth) moveRight = false;
+
+    lastMove = millis();
+    drawGame();
+  }
+
+  // Check button press to drop block
+  if (digitalRead(BUTTON_PIN) == LOW) {
+    delay(50); // debounce
+    if (digitalRead(BUTTON_PIN) == LOW) {
+      dropBlock();
+      while (digitalRead(BUTTON_PIN) == LOW); // wait for release
+    }
+  }
+}
