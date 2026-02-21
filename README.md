@@ -20,3 +20,7 @@ Requirements:
 
 Example:
 ![Matrix Board](images/arduino.jpg)
+
+![arduino photo](arduino.jpg)
+
+![Matrix Board](arduino.jpg)
