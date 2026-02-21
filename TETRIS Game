@@ -1,0 +1,250 @@
+#include <MD_Parola.h>
+#include <MD_MAX72xx.h>
+#include <SPI.h>
+
+// ================= DISPLAY =================
+#define MAX_DEVICES 4 //# of PANELS 
+#define DATA_PIN 8    //DIN
+#define CS_PIN 9      //CS
+#define CLK_PIN 11    //CLK
+
+MD_Parola display = MD_Parola(MD_MAX72XX::FC16_HW, DATA_PIN, CLK_PIN, CS_PIN, MAX_DEVICES);
+
+// ================ CONTROLS =================
+#define BTN_LEFT 2
+#define BTN_RIGHT 3
+
+#define BTN_ROTATE 4
+#define BTN_DROP 5
+
+#define BUZZER_PIN 6
+
+// ================ GRID =================
+#define WIDTH 8
+#define HEIGHT 32
+
+int board[HEIGHT][WIDTH];
+
+// ================ GAME STATE =================
+int pieceX, pieceY;
+int pieceType;
+int rotation;
+
+unsigned long lastFall = 0;
+int fallDelay = 400;
+
+bool gameOverFlag = false;
+
+// ================ TETROMINOS =================
+const byte shapes[7][4][4][4] = {
+  // I
+  {
+    {{0,0,0,0},{1,1,1,1},{0,0,0,0},{0,0,0,0}},
+    {{0,0,1,0},{0,0,1,0},{0,0,1,0},{0,0,1,0}},
+    {{0,0,0,0},{1,1,1,1},{0,0,0,0},{0,0,0,0}},
+    {{0,0,1,0},{0,0,1,0},{0,0,1,0},{0,0,1,0}}
+  },
+  // O
+  {
+    {{0,1,1,0},{0,1,1,0},{0,0,0,0},{0,0,0,0}},
+    {{0,1,1,0},{0,1,1,0},{0,0,0,0},{0,0,0,0}},
+    {{0,1,1,0},{0,1,1,0},{0,0,0,0},{0,0,0,0}},
+    {{0,1,1,0},{0,1,1,0},{0,0,0,0},{0,0,0,0}}
+  },
+  // T
+  {
+    {{0,1,0,0},{1,1,1,0},{0,0,0,0},{0,0,0,0}},
+    {{0,1,0,0},{0,1,1,0},{0,1,0,0},{0,0,0,0}},
+    {{0,0,0,0},{1,1,1,0},{0,1,0,0},{0,0,0,0}},
+    {{0,1,0,0},{1,1,0,0},{0,1,0,0},{0,0,0,0}}
+  },
+  // L
+  {
+    {{1,0,0,0},{1,1,1,0},{0,0,0,0},{0,0,0,0}},
+    {{0,1,1,0},{0,1,0,0},{0,1,0,0},{0,0,0,0}},
+    {{0,0,0,0},{1,1,1,0},{0,0,1,0},{0,0,0,0}},
+    {{0,1,0,0},{0,1,0,0},{1,1,0,0},{0,0,0,0}}
+  },
+  // J
+  {
+    {{0,0,1,0},{1,1,1,0},{0,0,0,0},{0,0,0,0}},
+    {{0,1,0,0},{0,1,0,0},{0,1,1,0},{0,0,0,0}},
+    {{0,0,0,0},{1,1,1,0},{1,0,0,0},{0,0,0,0}},
+    {{1,1,0,0},{0,1,0,0},{0,1,0,0},{0,0,0,0}}
+  },
+  // S
+  {
+    {{0,1,1,0},{1,1,0,0},{0,0,0,0},{0,0,0,0}},
+    {{0,1,0,0},{0,1,1,0},{0,0,1,0},{0,0,0,0}},
+    {{0,1,1,0},{1,1,0,0},{0,0,0,0},{0,0,0,0}},
+    {{0,1,0,0},{0,1,1,0},{0,0,1,0},{0,0,0,0}}
+  },
+  // Z
+  {
+    {{1,1,0,0},{0,1,1,0},{0,0,0,0},{0,0,0,0}},
+    {{0,0,1,0},{0,1,1,0},{0,1,0,0},{0,0,0,0}},
+    {{1,1,0,0},{0,1,1,0},{0,0,0,0},{0,0,0,0}},
+    {{0,0,1,0},{0,1,1,0},{0,1,0,0},{0,0,0,0}}
+  }
+};
+
+// ================== FUNCTIONS ==================
+
+void clearBoard() {
+  for(int r=0;r<HEIGHT;r++)
+    for(int c=0;c<WIDTH;c++)
+      board[r][c]=0;
+}
+
+bool collision(int x,int y,int rot) {
+  for(int r=0;r<4;r++)
+    for(int c=0;c<4;c++)
+      if(shapes[pieceType][rot][r][c]) {
+        int newX=x+c;
+        int newY=y+r;
+        if(newX<0||newX>=WIDTH||newY>=HEIGHT) return true;
+        if(newY>=0 && board[newY][newX]) return true;
+      }
+  return false;
+}
+
+void mergePiece() {
+  for(int r=0;r<4;r++)
+    for(int c=0;c<4;c++)
+      if(shapes[pieceType][rotation][r][c])
+        board[pieceY+r][pieceX+c]=1;
+}
+
+void newPiece() {
+  pieceType=random(0,7);
+  rotation=0;
+  pieceX=2;
+  pieceY=0;
+  if(collision(pieceX,pieceY,rotation))
+    gameOverFlag=true;
+}
+
+void clearLines() {
+  for(int r=0;r<HEIGHT;r++) {
+    bool full=true;
+    for(int c=0;c<WIDTH;c++)
+      if(!board[r][c]) full=false;
+    if(full) {
+      for(int rr=r;rr>0;rr--)
+        for(int c=0;c<WIDTH;c++)
+          board[rr][c]=board[rr-1][c];
+    }
+  }
+}
+
+void draw() {
+
+  display.displayClear();
+
+  // Draw placed blocks (flip vertically)
+  for(int r=0; r<HEIGHT; r++)
+    for(int c=0; c<WIDTH; c++)
+      if(board[r][c])
+        display.getGraphicObject()->setPoint(c, HEIGHT - 1 - r, true);
+
+  // Draw current falling piece (flip vertically)
+  for(int r=0; r<4; r++)
+    for(int c=0; c<4; c++)
+      if(shapes[pieceType][rotation][r][c])
+        display.getGraphicObject()->setPoint(
+          pieceX + c,
+          HEIGHT - 1 - (pieceY + r),
+          true
+        );
+
+  display.displayAnimate();
+}
+
+// ===== TETRIS THEME NOTES =====
+int melody[] = {
+  659,494,523,587,523,494,440,440,
+  523,659,587,523,494,523,587,659,
+  523,440,440,0
+};
+
+int noteDurations[] = {
+  180,180,180,180,180,180,180,180,
+  170,170,170,170,170,170,170,170,
+  170,170,170,200
+};
+
+void playTetrisTheme() {
+  for (int i = 0; i < 20; i++) {
+    if (melody[i] > 0) {
+      tone(BUZZER_PIN, melody[i], noteDurations[i]);
+    }
+    delay(noteDurations[i] + 30);
+    noTone(BUZZER_PIN);
+  }
+}
+
+// ================== SETUP ==================
+void setup() {
+  display.begin();
+  display.setIntensity(5);
+  display.displayClear();
+
+  pinMode(BTN_RIGHT,INPUT_PULLUP);
+  pinMode(BTN_LEFT,INPUT_PULLUP);
+  pinMode(BTN_ROTATE,INPUT_PULLUP);
+  pinMode(BTN_DROP,INPUT_PULLUP);
+
+  randomSeed(analogRead(A0));
+  clearBoard();
+  newPiece();
+
+  pinMode(BUZZER_PIN, OUTPUT);
+  playTetrisTheme();
+}
+
+// ================== LOOP ==================
+void loop() {
+
+  if(gameOverFlag){
+    display.displayClear();
+    display.displayText(" GAME OVER!",PA_CENTER,50,2000,PA_SCROLL_LEFT,PA_SCROLL_LEFT);
+    while(!display.displayAnimate());
+    clearBoard();
+    gameOverFlag=false;
+    newPiece();
+    playTetrisTheme();
+  }
+
+  if(digitalRead(BTN_RIGHT)==LOW){
+    if(!collision(pieceX-1,pieceY,rotation)) pieceX--;
+    delay(120);
+  }
+
+  if(digitalRead(BTN_LEFT)==LOW){
+    if(!collision(pieceX+1,pieceY,rotation)) pieceX++;
+    delay(120);
+  }
+
+  if(digitalRead(BTN_ROTATE)==LOW){
+    int newRot=(rotation+1)%4;
+    if(!collision(pieceX,pieceY,newRot)) rotation=newRot;
+    delay(150);
+  }
+
+  if(digitalRead(BTN_DROP)==LOW){
+    while(!collision(pieceX,pieceY+1,rotation)) pieceY++;
+  }
+
+  if(millis()-lastFall>fallDelay){
+    if(!collision(pieceX,pieceY+1,rotation)){
+      pieceY++;
+    } else {
+      mergePiece();
+      clearLines();
+      newPiece();
+    }
+    lastFall=millis();
+  }
+
+  draw();
+}
