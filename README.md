@@ -1,4 +1,20 @@
+# Arduino-Stacker-8x32-Matrix-board
+Stacker Game
+
 ![Arduino Image](arduino.jpg)
 
-# Arduino Stacker 8x32 Matrix Board  
-A detailed description of the Arduino Stacker 8x32 Matrix Board.
+Program: 
+- Arduino.IDE
+
+Library Dependencies:
+- <MD_Parola.h>
+- <MD_MAX72xx.h>
+- <SPI.h>
+
+Requirements:
+- Arduino
+- Breadboard
+- 8x32 Matrix board
+- (1-4) Buttons
+- Passive Buzzer (optional)
+- Jumper wires
