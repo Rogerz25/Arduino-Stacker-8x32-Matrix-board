@@ -18,3 +18,7 @@ Requirements:
 - (1-4) Buttons
 - Passive Buzzer (optional)
 - Jumper wires
+
+  ![Arduino Image](arduino2.jpg)
+
+  ![Arduino Image](arduino3.jpg)
