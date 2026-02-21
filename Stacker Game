@@ -3,34 +3,35 @@
 #include <SPI.h>
 
 // ================== DISPLAY SETUP ==================
-#define MAX_DEVICES 4 //PANELS 
-#define CLK_PIN 11
-#define DATA_PIN 12
-#define CS_PIN 10
+#define MAX_DEVICES 4 //# of PANELS 
+#define DATA_PIN 8    //DIN
+#define CS_PIN 9      //CS
+#define CLK_PIN 11    //CLK
 
 MD_Parola display = MD_Parola(MD_MAX72XX::FC16_HW, DATA_PIN, CLK_PIN, CS_PIN, MAX_DEVICES);
 
-// ================== INPUT / SOUND ==================
+// ================== PASSIVE BUZZER ==================
 #define BUTTON_PIN 2
-#define BUZZER_PIN 9
+#define BUZZER_PIN 3
 
 // ================== GRID ==================
 #define WIDTH 8
 #define HEIGHT 32
 
 // ================== GAME VARIABLES ==================
-int blockPos = 0;
-int blockWidth = 4;
+int blockPos = 0;     //STARTING POSITION
+int blockWidth = 4;  //STARTING WITH 4 LEDS DOTS
 int blockRow = 0;
 bool blockMoving = true;
 int stack[HEIGHT][WIDTH];
 bool gameOverFlag = false;
 unsigned long lastMove = 0;
-int moveDelay = 220;
+int moveDelay = 220;  //SPEED
 bool moveRight = true;
 
 // ================== SETUP ==================
-void setup() {
+void setup() 
+{
   Serial.begin(9600);
 
   display.begin();
@@ -103,10 +104,11 @@ void showGameOver() {
 }
 
 // ================== SCROLL WINNER ==================
-void showWinner() {
+void showWinner() 
+{
   display.displayClear();
 
-  display.displayText(" WINNER... NOW GO TOUCH SOME GRASS", PA_CENTER, 50, 2000, PA_SCROLL_LEFT, PA_SCROLL_LEFT);
+  display.displayText(" WINNER!!", PA_CENTER, 50, 2000, PA_SCROLL_LEFT, PA_SCROLL_LEFT);
 
   // Victory tone sequence
   tone(BUZZER_PIN, 1000, 200);
@@ -115,13 +117,15 @@ void showWinner() {
   delay(250);
   tone(BUZZER_PIN, 1500, 400);
 
-  while (!display.displayAnimate()) {
+  while (!display.displayAnimate()) 
+  {
     // wait until finished scrolling
   }
 }
 
 // ================== DROP BLOCK ==================
-void dropBlock() {
+void dropBlock() 
+{
   blockMoving = false;
 
   int module = blockRow / 8;
@@ -135,8 +139,10 @@ void dropBlock() {
   int prevRow = blockRow - 1;
   bool perfect = true;
 
-  for (int c = blockPos; c < blockPos + blockWidth; c++) {
-    if (prevRow < 0 || stack[prevRow][c]) {
+  for (int c = blockPos; c < blockPos + blockWidth; c++) 
+  {
+    if (prevRow < 0 || stack[prevRow][c]) 
+    {
       stack[blockRow][c] = 1;
       overlap++;
     } else {
@@ -148,7 +154,8 @@ void dropBlock() {
   if (blockWidth >= 3 && prevRow >= 0)
     required = blockWidth - 1;
 
-  if (!perfect && overlap < required) {
+  if (!perfect && overlap < required) 
+  {
     gameOverFlag = true;
 
     // Game Over Sound
@@ -171,7 +178,8 @@ void dropBlock() {
   updateSpeed();
 
   // Victory condition
-  if (blockRow >= HEIGHT) {
+  if (blockRow >= HEIGHT) 
+  {
     gameOverFlag = true;
     showWinner();
     return;
