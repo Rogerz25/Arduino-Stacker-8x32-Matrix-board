@@ -3,21 +3,21 @@
 #include <SPI.h>
 
 // ================= DISPLAY =================
-#define MAX_DEVICES 4 //# of PANELS 
-#define DATA_PIN 8    //DIN
-#define CS_PIN 9      //CS
-#define CLK_PIN 11    //CLK
+#define MAX_DEVICES 4
+#define DATA_PIN 8
+#define CS_PIN 9
+#define CLK_PIN 11
 
 MD_Parola display = MD_Parola(MD_MAX72XX::FC16_HW, DATA_PIN, CLK_PIN, CS_PIN, MAX_DEVICES);
 
 // ================ CONTROLS =================
 #define BTN_LEFT 2
 #define BTN_RIGHT 3
-
 #define BTN_ROTATE 4
 #define BTN_DROP 5
-
 #define BUZZER_PIN 6
+
+
 
 // ================ GRID =================
 #define WIDTH 8
@@ -30,10 +30,18 @@ int pieceX, pieceY;
 int pieceType;
 int rotation;
 
+// Track previous piece state for partial redraw
+int lastPieceX, lastPieceY, lastPieceType, lastRotation;
+bool firstDraw = true;  // force full draw on first frame
+
 unsigned long lastFall = 0;
 int fallDelay = 400;
-
 bool gameOverFlag = false;
+
+
+unsigned long lastDrop = 0;
+#define DROP_COOLDOWN 1500  // 1.5 seconds
+
 
 // ================ TETROMINOS =================
 const byte shapes[7][4][4][4] = {
@@ -88,96 +96,153 @@ const byte shapes[7][4][4][4] = {
   }
 };
 
-// ================== FUNCTIONS ==================
+// ================== HELPERS ==================
 
 void clearBoard() {
-  for(int r=0;r<HEIGHT;r++)
-    for(int c=0;c<WIDTH;c++)
-      board[r][c]=0;
+  for (int r = 0; r < HEIGHT; r++)
+    for (int c = 0; c < WIDTH; c++)
+      board[r][c] = 0;
 }
 
-bool collision(int x,int y,int rot) {
-  for(int r=0;r<4;r++)
-    for(int c=0;c<4;c++)
-      if(shapes[pieceType][rot][r][c]) {
-        int newX=x+c;
-        int newY=y+r;
-        if(newX<0||newX>=WIDTH||newY>=HEIGHT) return true;
-        if(newY>=0 && board[newY][newX]) return true;
+bool collision(int x, int y, int rot) {
+  for (int r = 0; r < 4; r++)
+    for (int c = 0; c < 4; c++)
+      if (shapes[pieceType][rot][r][c]) {
+        int newX = x + c;
+        int newY = y + r;
+        if (newX < 0 || newX >= WIDTH || newY >= HEIGHT) return true;
+        if (newY >= 0 && board[newY][newX]) return true;
       }
   return false;
 }
 
 void mergePiece() {
-  for(int r=0;r<4;r++)
-    for(int c=0;c<4;c++)
-      if(shapes[pieceType][rotation][r][c])
-        board[pieceY+r][pieceX+c]=1;
+  for (int r = 0; r < 4; r++)
+    for (int c = 0; c < 4; c++)
+      if (shapes[pieceType][rotation][r][c])
+        board[pieceY + r][pieceX + c] = 1;
 }
 
 void newPiece() {
-  pieceType=random(0,7);
-  rotation=0;
-  pieceX=2;
-  pieceY=0;
-  if(collision(pieceX,pieceY,rotation))
-    gameOverFlag=true;
+  pieceType = random(0, 7);
+  rotation = 0;
+  pieceX = 2;
+  pieceY = 0;
+  if (collision(pieceX, pieceY, rotation))
+    gameOverFlag = true;
+  firstDraw = true;  // force full redraw when new piece spawns
 }
 
 void clearLines() {
-  for(int r=0;r<HEIGHT;r++) {
-    bool full=true;
-    for(int c=0;c<WIDTH;c++)
-      if(!board[r][c]) full=false;
-    if(full) {
-      for(int rr=r;rr>0;rr--)
-        for(int c=0;c<WIDTH;c++)
-          board[rr][c]=board[rr-1][c];
+  bool anyCleared = false;
+
+  for (int r = 0; r < HEIGHT; r++) {
+    bool full = true;
+    for (int c = 0; c < WIDTH; c++)
+      if (!board[r][c]) full = false;
+    if (full) {
+      anyCleared = true;
+      for (int rr = r; rr > 0; rr--)
+        for (int c = 0; c < WIDTH; c++)
+          board[rr][c] = board[rr - 1][c];
     }
+  }
+
+  if (anyCleared) playLineClear();
+}
+
+// ================== DRAW PIECE PIXELS ONLY ==================
+void erasePiece(int x, int y, int type, int rot) {
+  for (int r = 0; r < 4; r++)
+    for (int c = 0; c < 4; c++)
+      if (shapes[type][rot][r][c]) {
+        int screenY = HEIGHT - 1 - (y + r);
+        int screenX = x + c;
+        if (screenX >= 0 && screenX < WIDTH && screenY >= 0 && screenY < HEIGHT)
+          display.getGraphicObject()->setPoint(screenX, screenY, false);
+      }
+}
+
+void drawPiece(int x, int y, int type, int rot) {
+  for (int r = 0; r < 4; r++)
+    for (int c = 0; c < 4; c++)
+      if (shapes[type][rot][r][c]) {
+        int screenY = HEIGHT - 1 - (y + r);
+        int screenX = x + c;
+        if (screenX >= 0 && screenX < WIDTH && screenY >= 0 && screenY < HEIGHT)
+          display.getGraphicObject()->setPoint(screenX, screenY, true);
+      }
+}
+
+// ================== FULL REDRAW (merge/line clear/new piece/reset) ==================
+void drawFullBoard() {
+  display.displayClear();
+
+  for (int r = 0; r < HEIGHT; r++)
+    for (int c = 0; c < WIDTH; c++)
+      if (board[r][c])
+        display.getGraphicObject()->setPoint(c, HEIGHT - 1 - r, true);
+
+  drawPiece(pieceX, pieceY, pieceType, rotation);
+  display.displayAnimate();
+
+  // Sync last state
+  lastPieceX = pieceX;
+  lastPieceY = pieceY;
+  lastPieceType = pieceType;
+  lastRotation = rotation;
+  firstDraw = false;
+}
+
+// ================== PARTIAL REDRAW (movement only) ==================
+void drawPartial() {
+  // Erase old piece, draw new piece — board pixels untouched
+  erasePiece(lastPieceX, lastPieceY, lastPieceType, lastRotation);
+  drawPiece(pieceX, pieceY, pieceType, rotation);
+  display.displayAnimate();
+
+  lastPieceX = pieceX;
+  lastPieceY = pieceY;
+  lastPieceType = pieceType;
+  lastRotation = rotation;
+}
+
+// ================== SMART DRAW ==================
+void draw(bool fullRedraw = false) {
+  if (fullRedraw || firstDraw) {
+    drawFullBoard();
+  } else {
+    drawPartial();
   }
 }
 
-void draw() {
-
-  display.displayClear();
-
-  // Draw placed blocks (flip vertically)
-  for(int r=0; r<HEIGHT; r++)
-    for(int c=0; c<WIDTH; c++)
-      if(board[r][c])
-        display.getGraphicObject()->setPoint(c, HEIGHT - 1 - r, true);
-
-  // Draw current falling piece (flip vertically)
-  for(int r=0; r<4; r++)
-    for(int c=0; c<4; c++)
-      if(shapes[pieceType][rotation][r][c])
-        display.getGraphicObject()->setPoint(
-          pieceX + c,
-          HEIGHT - 1 - (pieceY + r),
-          true
-        );
-
-  display.displayAnimate();
-}
-
-// ===== TETRIS THEME NOTES =====
+// ===== TETRIS THEME =====
 int melody[] = {
   659,494,523,587,523,494,440,440,
   523,659,587,523,494,523,587,659,
   523,440,440,0
 };
-
 int noteDurations[] = {
   180,180,180,180,180,180,180,180,
   170,170,170,170,170,170,170,170,
   170,170,170,200
 };
 
+void playLineClear() {
+  tone(BUZZER_PIN, 800, 80);
+  delay(90);
+  tone(BUZZER_PIN, 1000, 80);
+  delay(90);
+  tone(BUZZER_PIN, 1200, 80);
+  delay(90);
+  tone(BUZZER_PIN, 1600, 120);
+  delay(130);
+  noTone(BUZZER_PIN);
+}
+
 void playTetrisTheme() {
   for (int i = 0; i < 20; i++) {
-    if (melody[i] > 0) {
-      tone(BUZZER_PIN, melody[i], noteDurations[i]);
-    }
+    if (melody[i] > 0) tone(BUZZER_PIN, melody[i], noteDurations[i]);
     delay(noteDurations[i] + 30);
     noTone(BUZZER_PIN);
   }
@@ -189,62 +254,80 @@ void setup() {
   display.setIntensity(5);
   display.displayClear();
 
-  pinMode(BTN_RIGHT,INPUT_PULLUP);
-  pinMode(BTN_LEFT,INPUT_PULLUP);
-  pinMode(BTN_ROTATE,INPUT_PULLUP);
-  pinMode(BTN_DROP,INPUT_PULLUP);
+  pinMode(BTN_RIGHT, INPUT_PULLUP);
+  pinMode(BTN_LEFT, INPUT_PULLUP);
+  pinMode(BTN_ROTATE, INPUT_PULLUP);
+  pinMode(BTN_DROP, INPUT_PULLUP);
+  pinMode(BUZZER_PIN, OUTPUT);
 
   randomSeed(analogRead(A0));
   clearBoard();
   newPiece();
-
-  pinMode(BUZZER_PIN, OUTPUT);
   playTetrisTheme();
 }
 
 // ================== LOOP ==================
-void loop() {
+void loop() 
+{
 
-  if(gameOverFlag){
+ 
+
+  if (gameOverFlag) {
     display.displayClear();
-    display.displayText(" GAME OVER!",PA_CENTER,50,2000,PA_SCROLL_LEFT,PA_SCROLL_LEFT);
-    while(!display.displayAnimate());
+    display.displayText(" GAME OVER!", PA_CENTER, 50, 2000, PA_SCROLL_LEFT, PA_SCROLL_LEFT);
+    while (!display.displayAnimate());
     clearBoard();
-    gameOverFlag=false;
+    gameOverFlag = false;
     newPiece();
     playTetrisTheme();
+    return;
   }
 
-  if(digitalRead(BTN_RIGHT)==LOW){
-    if(!collision(pieceX-1,pieceY,rotation)) pieceX--;
+  bool moved = false;
+
+  if (digitalRead(BTN_RIGHT) == LOW) {
+    if (!collision(pieceX - 1, pieceY, rotation)) { pieceX--; moved = true; }
     delay(120);
   }
 
-  if(digitalRead(BTN_LEFT)==LOW){
-    if(!collision(pieceX+1,pieceY,rotation)) pieceX++;
+  if (digitalRead(BTN_LEFT) == LOW) {
+    if (!collision(pieceX + 1, pieceY, rotation)) { pieceX++; moved = true; }
     delay(120);
   }
 
-  if(digitalRead(BTN_ROTATE)==LOW){
-    int newRot=(rotation+1)%4;
-    if(!collision(pieceX,pieceY,newRot)) rotation=newRot;
+  if (digitalRead(BTN_ROTATE) == LOW) {
+    int newRot = (rotation + 1) % 4;
+    if (!collision(pieceX, pieceY, newRot)) { rotation = newRot; moved = true; }
     delay(150);
   }
 
-  if(digitalRead(BTN_DROP)==LOW){
-    while(!collision(pieceX,pieceY+1,rotation)) pieceY++;
+   if (digitalRead(BTN_DROP) == LOW && millis() - lastDrop >= DROP_COOLDOWN) {
+    while (!collision(pieceX, pieceY + 1, rotation)) pieceY++;
+    mergePiece();
+    clearLines();
+    newPiece();
+    draw(true);
+    lastDrop = millis();  // record the time of this drop
+    return;
   }
 
-  if(millis()-lastFall>fallDelay){
-    if(!collision(pieceX,pieceY+1,rotation)){
+  if (millis() - lastFall > fallDelay) {
+    if (!collision(pieceX, pieceY + 1, rotation)) {
       pieceY++;
+      moved = true;
     } else {
       mergePiece();
       clearLines();
       newPiece();
+      draw(true);  // full redraw after merge
+      lastFall = millis();
+      return;
     }
-    lastFall=millis();
+    lastFall = millis();
   }
 
-  draw();
+  
+
+
+  if (moved) draw();       // partial redraw — only piece pixels changed
 }
