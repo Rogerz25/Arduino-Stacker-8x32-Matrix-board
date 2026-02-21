@@ -16,7 +16,7 @@ Requirements:
 - Passive Buzzer
 - Jumper wires
 
-![arduino photo](images/arduino.jpg)
+![arduino photo]([images/arduino.jpg](https://github.com/Rogerz25/Arduino-Stacker-8x32-Matrix-board/blob/main/arduino.jpg))
 
 Example:
 ![Matrix Board](images/arduino.jpg)
