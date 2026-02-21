@@ -3,11 +3,10 @@
 #include <SPI.h>
 
 // ================== DISPLAY SETUP ==================
-#define MAX_DEVICES 4 //# of PANELS 
-#define DATA_PIN 8    //DIN
-#define CS_PIN 9      //CS
-#define CLK_PIN 11    //CLK
-
+#define MAX_DEVICES 4
+#define DATA_PIN 8
+#define CS_PIN 9
+#define CLK_PIN 11
 
 MD_Parola display = MD_Parola(MD_MAX72XX::FC16_HW, DATA_PIN, CLK_PIN, CS_PIN, MAX_DEVICES);
 
@@ -20,8 +19,8 @@ MD_Parola display = MD_Parola(MD_MAX72XX::FC16_HW, DATA_PIN, CLK_PIN, CS_PIN, MA
 #define HEIGHT 32
 
 // ================== GAME VARIABLES ==================
-int blockPos = 0;
-int blockWidth = 4;
+int blockPos = 0;     //STARTING POSITION
+int blockWidth = 4;  //STARTING WITH 4 LEDS DOTS
 int blockRow = 0;
 bool blockMoving = true;
 int stack[HEIGHT][WIDTH];
@@ -29,6 +28,7 @@ bool gameOverFlag = false;
 unsigned long lastMove = 0;
 int moveDelay = 220;
 bool moveRight = true;
+int lastBlockPos = -1;  // tracks previous block position for partial redraw
 
 // ================== SETUP ==================
 void setup() {
@@ -55,53 +55,78 @@ void resetGame() {
   gameOverFlag = false;
   moveDelay = 220;
   moveRight = true;
+  lastBlockPos = -1;
 
   blockPos = random(0, WIDTH - blockWidth + 1);
 
-  drawGame();
+  drawFullGame();  // full redraw only on reset
 }
 
 // ================== SPEED INCREASE ==================
 void updateSpeed() {
-  if (blockRow < 8) moveDelay = 180;
-  else if (blockRow < 16) moveDelay = 150;
-  else if (blockRow < 24) moveDelay = 130;
-  else moveDelay = 110;
+  if (blockRow < 8) moveDelay = 160;
+  else if (blockRow < 16) moveDelay = 140;
+  else if (blockRow < 24) moveDelay = 120;
+  else moveDelay = 100;
 }
 
-// ================== DRAW GAME ==================
-void drawGame() {
+// ================== FULL REDRAW (reset/init only) ==================
+void drawFullGame() {
   display.displayClear();
 
-  for (int r = 0; r < HEIGHT; r++) {
-    for (int c = 0; c < WIDTH; c++) {
-      if (stack[r][c]) {
+  for (int r = 0; r < HEIGHT; r++)
+    for (int c = 0; c < WIDTH; c++)
+      if (stack[r][c])
         display.getGraphicObject()->setPoint(c, r, true);
-      }
-    }
-  }
 
-  if (!gameOverFlag && blockMoving) {
-    for (int c = blockPos; c < blockPos + blockWidth; c++) {
+  if (!gameOverFlag && blockMoving)
+    for (int c = blockPos; c < blockPos + blockWidth; c++)
       display.getGraphicObject()->setPoint(c, blockRow, true);
+
+  display.displayAnimate();
+  lastBlockPos = blockPos;
+}
+
+// ================== DRAW CURRENT ROW ONLY (during movement) ==================
+void drawCurrentRow() {
+  // Erase previous block position on this row
+  if (lastBlockPos >= 0) {
+    for (int c = lastBlockPos; c < lastBlockPos + blockWidth + 1; c++) {
+      if (c >= 0 && c < WIDTH)
+        display.getGraphicObject()->setPoint(c, blockRow, false);
     }
   }
 
+  // Draw new block position
+  for (int c = blockPos; c < blockPos + blockWidth; c++) {
+    if (c >= 0 && c < WIDTH)
+      display.getGraphicObject()->setPoint(c, blockRow, true);
+  }
+
+  lastBlockPos = blockPos;
   display.displayAnimate();
 }
 
-// ================== FALLING ANIMATION ==================
+// ================== COMMIT STACK ROW (after drop) ==================
+void drawStackRow(int row) {
+  for (int c = 0; c < WIDTH; c++) {
+    display.getGraphicObject()->setPoint(c, row, stack[row][c] ? true : false);
+  }
+}
+
+// ================== FALLING ANIMATION (cut pieces) ==================
 void animateFalling(int startCol[], int count) {
   for (int step = 0; step < 6; step++) {
-    display.displayClear();
+    // Erase previous falling positions
+    if (step > 0) {
+      for (int i = 0; i < count; i++) {
+        int prevRow = blockRow + step - 1;
+        if (prevRow < HEIGHT)
+          display.getGraphicObject()->setPoint(startCol[i], prevRow, false);
+      }
+    }
 
-    // redraw stack
-    for (int r = 0; r < HEIGHT; r++)
-      for (int c = 0; c < WIDTH; c++)
-        if (stack[r][c])
-          display.getGraphicObject()->setPoint(c, r, true);
-
-    // draw falling pieces
+    // Draw new falling positions
     for (int i = 0; i < count; i++) {
       int fallRow = blockRow + step;
       if (fallRow < HEIGHT)
@@ -111,6 +136,14 @@ void animateFalling(int startCol[], int count) {
     display.displayAnimate();
     delay(50);
   }
+
+  // Erase final falling position
+  for (int i = 0; i < count; i++) {
+    int finalRow = blockRow + 5;
+    if (finalRow < HEIGHT)
+      display.getGraphicObject()->setPoint(startCol[i], finalRow, false);
+  }
+  display.displayAnimate();
 }
 
 // ================== GAME OVER ==================
@@ -150,16 +183,16 @@ void dropBlock() {
   int cutCount = 0;
 
   if (prevRow < 0) {
+    // First row — just lock it in
     for (int c = blockPos; c < blockPos + blockWidth; c++)
       stack[blockRow][c] = 1;
-  }
-  else {
+  } else {
     for (int c = blockPos; c < blockPos + blockWidth; c++) {
       if (stack[prevRow][c]) {
         stack[blockRow][c] = 1;
         overlap++;
       } else {
-        cutCols[cutCount++] = c;  // store cut pieces
+        cutCols[cutCount++] = c;
       }
     }
 
@@ -176,6 +209,10 @@ void dropBlock() {
     blockWidth = overlap;
   }
 
+  // Commit current row to display
+  drawStackRow(blockRow);
+  display.displayAnimate();
+
   tone(BUZZER_PIN, 1000, 100);
 
   blockRow++;
@@ -187,6 +224,7 @@ void dropBlock() {
     return;
   }
 
+  // Start new block aligned to stack below
   for (int c = 0; c < WIDTH; c++) {
     if (stack[blockRow - 1][c]) {
       blockPos = c;
@@ -194,8 +232,9 @@ void dropBlock() {
     }
   }
 
+  lastBlockPos = -1;  // reset so drawCurrentRow erases cleanly from scratch
   blockMoving = true;
-  drawGame();
+  drawCurrentRow();   // draw only the new row, not the whole grid
 }
 
 // ================== MAIN LOOP ==================
@@ -217,7 +256,7 @@ void loop() {
     if (blockPos >= WIDTH - blockWidth) moveRight = false;
 
     lastMove = millis();
-    drawGame();
+    drawCurrentRow();  // only update current row
   }
 
   if (digitalRead(BUTTON_PIN) == LOW) {
