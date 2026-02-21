@@ -13,10 +13,8 @@ Requirements:
 - Arduino
 - Breadboard
 - 8x32 Matrix board
-- Passive Buzzer
+- (1-4) Buttons
+- Passive Buzzer (optional)
 - Jumper wires
 
-![arduino photo]([images/arduino.jpg](https://github.com/Rogerz25/Arduino-Stacker-8x32-Matrix-board/blob/main/arduino.jpg))
 
-Example:
-![Matrix Board](images/arduino.jpg)
