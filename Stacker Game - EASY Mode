@@ -63,10 +63,10 @@ void resetGame() {
 
 // ================== SPEED INCREASE ==================
 void updateSpeed() {
-  if (blockRow < 8) moveDelay = 190;
-  else if (blockRow < 16) moveDelay = 160;
+  if (blockRow < 8) moveDelay = 180;
+  else if (blockRow < 16) moveDelay = 150;
   else if (blockRow < 24) moveDelay = 130;
-  else moveDelay = 100;
+  else moveDelay = 110;
 }
 
 // ================== DRAW GAME ==================
@@ -90,10 +90,33 @@ void drawGame() {
   display.displayAnimate();
 }
 
+// ================== FALLING ANIMATION ==================
+void animateFalling(int startCol[], int count) {
+  for (int step = 0; step < 6; step++) {
+    display.displayClear();
+
+    // redraw stack
+    for (int r = 0; r < HEIGHT; r++)
+      for (int c = 0; c < WIDTH; c++)
+        if (stack[r][c])
+          display.getGraphicObject()->setPoint(c, r, true);
+
+    // draw falling pieces
+    for (int i = 0; i < count; i++) {
+      int fallRow = blockRow + step;
+      if (fallRow < HEIGHT)
+        display.getGraphicObject()->setPoint(startCol[i], fallRow, true);
+    }
+
+    display.displayAnimate();
+    delay(50);
+  }
+}
+
 // ================== GAME OVER ==================
 void showGameOver() {
   display.displayClear();
-  display.displayText(" GAME OVER! ", PA_CENTER, 50, 2000, PA_SCROLL_LEFT, PA_SCROLL_LEFT);
+  display.displayText(" GAME OVER LOSER!", PA_CENTER, 50, 2000, PA_SCROLL_LEFT, PA_SCROLL_LEFT);
 
   tone(BUZZER_PIN, 400, 300);
   delay(350);
@@ -106,7 +129,7 @@ void showGameOver() {
 // ================== WINNER ==================
 void showWinner() {
   display.displayClear();
-  display.displayText("WINNER! ", PA_CENTER, 50, 2000, PA_SCROLL_LEFT, PA_SCROLL_LEFT);
+  display.displayText(" HUH..YOU ACTUALLY WON!", PA_CENTER, 50, 2000, PA_SCROLL_LEFT, PA_SCROLL_LEFT);
 
   tone(BUZZER_PIN, 1000, 200);
   delay(250);
@@ -123,29 +146,33 @@ void dropBlock() {
 
   int overlap = 0;
   int prevRow = blockRow - 1;
+  int cutCols[4];
+  int cutCount = 0;
 
-  // First row stays full width
   if (prevRow < 0) {
     for (int c = blockPos; c < blockPos + blockWidth; c++)
       stack[blockRow][c] = 1;
   }
   else {
-    // Check overlap
     for (int c = blockPos; c < blockPos + blockWidth; c++) {
       if (stack[prevRow][c]) {
         stack[blockRow][c] = 1;
         overlap++;
+      } else {
+        cutCols[cutCount++] = c;  // store cut pieces
       }
     }
 
-    // No overlap = GAME OVER
     if (overlap == 0) {
       gameOverFlag = true;
       showGameOver();
       return;
     }
 
-    // Cut off misaligned parts
+    if (cutCount > 0) {
+      animateFalling(cutCols, cutCount);
+    }
+
     blockWidth = overlap;
   }
 
@@ -154,14 +181,12 @@ void dropBlock() {
   blockRow++;
   updateSpeed();
 
-  // WIN CONDITION
   if (blockRow >= HEIGHT) {
     gameOverFlag = true;
     showWinner();
     return;
   }
 
-  // Align next block with current stack
   for (int c = 0; c < WIDTH; c++) {
     if (stack[blockRow - 1][c]) {
       blockPos = c;
@@ -185,7 +210,6 @@ void loop() {
     return;
   }
 
-  // Move block
   if (blockMoving && millis() - lastMove >= moveDelay) {
     blockPos += moveRight ? 1 : -1;
 
@@ -196,7 +220,6 @@ void loop() {
     drawGame();
   }
 
-  // Drop block
   if (digitalRead(BUTTON_PIN) == LOW) {
     delay(50);
     if (digitalRead(BUTTON_PIN) == LOW) {
