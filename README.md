@@ -24,7 +24,7 @@ Requirements:
 
   ![Arduino Image](arduino3.jpg)
 
-  ------TETRIS------
+        TETRIS
 ======================
  ![Arduino Image](arduino4.jpg)
   
