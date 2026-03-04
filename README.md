@@ -1,5 +1,6 @@
 # Arduino-Stacker-8x32-Matrix-board
-Stacker Game
+   Stacker Game
+====================
 
 ![Arduino Image](arduino.jpg)
 
@@ -24,5 +25,6 @@ Requirements:
   ![Arduino Image](arduino3.jpg)
 
   ------TETRIS------
+======================
  ![Arduino Image](arduino4.jpg)
   
